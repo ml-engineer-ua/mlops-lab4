@@ -1,0 +1,82 @@
+# Scheduled Pipeline: Continuous Training
+# Запуск навчального пайплайну за розкладом або при нових даних
+
+name: Scheduled Training Pipeline
+
+on:
+  schedule:
+    # Щоденно о 02:00 UTC
+    - cron: "0 2 * * *"
+  # Тригер на нові дані (push до папки data/)
+  push:
+    branches: [main]
+    paths:
+      - "lab4/data/raw/**"
+  workflow_dispatch:
+    inputs:
+      max_samples:
+        description: "Max training samples (0 = all)"
+        required: false
+        default: "0"
+
+jobs:
+  check-new-data:
+    name: Check for New Data
+    runs-on: ubuntu-latest
+    outputs:
+      has_new_data: ${{ steps.check.outputs.has_new_data }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check data changes
+        id: check
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q "lab4/data/"; then
+            echo "has_new_data=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_new_data=true" >> $GITHUB_OUTPUT
+          fi
+
+  train:
+    name: Run Training Pipeline
+    runs-on: ubuntu-latest
+    needs: check-new-data
+    if: needs.check-new-data.outputs.has_new_data == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r lab4/requirements.txt
+          python -m spacy download en_core_web_sm
+
+      - name: Run training pipeline
+        working-directory: lab4
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: |
+          MAX_SAMPLES="${{ github.event.inputs.max_samples || '0' }}"
+          if [ "$MAX_SAMPLES" = "0" ]; then
+            python pipeline/run_pipeline.py --mode local
+          else
+            python pipeline/run_pipeline.py --mode local --max-samples $MAX_SAMPLES
+          fi
+
+      - name: Run drift detection
+        working-directory: lab4
+        run: python monitoring/evidently_monitor.py --auto
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-reports-${{ github.run_number }}
+          path: lab4/monitoring/reports/

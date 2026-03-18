@@ -1,0 +1,45 @@
+# Lab 4 — .gitignore
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Data (великі файли)
+data/raw/*.csv
+data/processed/*.csv
+
+# Models (великі файли)
+models/baseline/
+models/distilbert/
+models/*.joblib
+
+# Terraform state
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+docker/postgres_data/
+
+# Deployment state
+scripts/deploy_state.json
+
+# Logs
+*.log
+
+# wandb
+wandb/

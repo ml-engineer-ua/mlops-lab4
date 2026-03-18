@@ -1,0 +1,54 @@
+# CD Pipeline: Deploy + Smoke Test
+# Тригер: після успішного CI або вручну
+
+name: CD Pipeline
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    name: Deploy (Blue/Green)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pyyaml boto3
+
+      - name: Deploy with Blue/Green strategy
+        working-directory: lab4
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'staging' }}
+        run: python scripts/blue_green_deploy.py --env $DEPLOY_ENV
+
+      - name: Smoke test
+        working-directory: lab4
+        run: python tests/test_smoke.py --url http://localhost:5000
+
+      - name: Rollback on failure
+        if: failure()
+        working-directory: lab4
+        run: python scripts/blue_green_deploy.py --rollback

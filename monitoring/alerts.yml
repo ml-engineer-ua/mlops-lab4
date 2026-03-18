@@ -1,0 +1,58 @@
+# Prometheus Alert Rules — SLO Alerts
+
+groups:
+  - name: slo_alerts
+    rules:
+      # P99 latency > 500ms for 5 minutes
+      - alert: HighPredictionLatency
+        expr: histogram_quantile(0.99, rate(prediction_latency_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          slo: latency
+        annotations:
+          summary: "P99 prediction latency exceeds SLO (500ms)"
+          description: "P99 latency = {{ $value }}s, SLO target = 0.5s"
+
+      # Error rate > 1% for 5 minutes
+      - alert: HighErrorRate
+        expr: rate(api_errors_total[5m]) / rate(api_requests_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          slo: error_rate
+        annotations:
+          summary: "API error rate exceeds SLO (1%)"
+          description: "Error rate = {{ $value | humanizePercentage }}"
+
+      # Data drift detected
+      - alert: DataDriftDetected
+        expr: data_drift_score > 0.5
+        for: 1m
+        labels:
+          severity: warning
+          slo: drift
+        annotations:
+          summary: "Data drift detected — model retraining recommended"
+          description: "Drift score = {{ $value }}"
+
+      # Model F1 score low
+      - alert: LowModelPerformance
+        expr: model_f1_score < 0.6
+        for: 10m
+        labels:
+          severity: critical
+          slo: model_quality
+        annotations:
+          summary: "Model F1 score below threshold (0.6)"
+          description: "F1 = {{ $value }}"
+
+      # Service availability < 99.5%
+      - alert: LowAvailability
+        expr: (1 - rate(api_errors_total{status="503"}[1h]) / rate(api_requests_total[1h])) < 0.995
+        for: 15m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Service availability below SLO (99.5%)"

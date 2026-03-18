@@ -1,0 +1,128 @@
+version: "3.8"
+
+services:
+  # ── PostgreSQL (для MLflow) ──
+  postgres:
+    image: postgres:15
+    container_name: lab4-postgres
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow123
+      POSTGRES_DB: mlflow
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MLflow Tracking Server ──
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    container_name: lab4-mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+    ports:
+      - "5003:5001"
+    command: >
+      mlflow server
+        --host 0.0.0.0
+        --port 5001
+        --backend-store-uri postgresql://mlflow:mlflow123@postgres:5432/mlflow
+        --default-artifact-root s3://${S3_MLFLOW_BUCKET:-mlops-lab2-mlflow-artifacts}/lab4
+
+  # ── API Blue (активний) ──
+  api-blue:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: lab4-api-blue
+    depends_on:
+      - mlflow
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5001
+      - DEPLOYMENT_SLOT=blue
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+    ports:
+      - "5000:5000"
+      - "8000:8000"
+    volumes:
+      - ../models:/app/models
+      - ../data:/app/data
+
+  # ── API Green (канаркова/нова версія) ──
+  api-green:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: lab4-api-green
+    depends_on:
+      - mlflow
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5001
+      - DEPLOYMENT_SLOT=green
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+    ports:
+      - "5001:5000"
+      - "8001:8000"
+    volumes:
+      - ../models:/app/models
+      - ../data:/app/data
+
+  # ── Nginx Load Balancer (Blue/Green routing) ──
+  nginx:
+    image: nginx:alpine
+    container_name: lab4-nginx
+    depends_on:
+      - api-blue
+      - api-green
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # ── Prometheus ──
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: lab4-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+
+  # ── Grafana ──
+  grafana:
+    image: grafana/grafana:latest
+    container_name: lab4-grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

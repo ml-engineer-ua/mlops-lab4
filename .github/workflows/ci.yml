@@ -1,0 +1,86 @@
+# CI Pipeline: Lint + Test + Build Docker
+# Запускається на кожний push/PR до main
+
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lab4/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "lab4/**"
+
+env:
+  DOCKER_REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/mlops-lab4-api
+
+jobs:
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install linters
+        run: pip install flake8 black
+
+      - name: Run flake8
+        run: flake8 lab4/ --max-line-length=120 --exclude=__pycache__
+
+      - name: Check Black formatting
+        run: black --check --line-length=120 lab4/
+
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r lab4/requirements.txt
+          python -m spacy download en_core_web_sm
+
+      - name: Run tests
+        working-directory: lab4
+        run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing
+
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: lab4
+          file: lab4/docker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
