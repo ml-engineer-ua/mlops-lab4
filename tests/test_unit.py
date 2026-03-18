@@ -37,7 +37,7 @@ class TestAPI:
 
     @pytest.fixture
     def client(self):
-        from app import app
+        from src.app import app
         app.config["TESTING"] = True
         with app.test_client() as client:
             yield client

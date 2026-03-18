@@ -22,7 +22,7 @@ from monitoring.prometheus_metrics import (
     REQUEST_COUNT,
     REQUEST_LATENCY,
     PREDICTION_COUNT,
-    MODEL_F1,
+    MODEL_F1_SCORE,
     DATA_DRIFT_SCORE,
     SLOChecker,
 )
@@ -109,7 +109,10 @@ def after_request(response):
         method=request.method,
         endpoint=request.path,
     ).observe(latency)
-    slo_checker.record_request(latency, response.status_code)
+    slo_checker.record_request(
+        latency_ms=latency * 1000,
+        is_error=response.status_code >= 500,
+    )
     return response
 
 
@@ -145,7 +148,7 @@ def predict():
     else:
         return jsonify({"error": "No model available"}), 503
 
-    PREDICTION_COUNT.labels(model=result["model"], category=result["category"]).inc()
+    PREDICTION_COUNT.labels(model_type=result["model"], category=result["category"]).inc()
     result["latency_ms"] = round((time.time() - start) * 1000, 2)
     result["slot"] = DEPLOYMENT_SLOT
     return jsonify(result)
@@ -211,7 +214,8 @@ def switch_model():
 def metrics():
     """Prometheus metrics endpoint."""
     from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-    return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+    from monitoring.prometheus_metrics import REGISTRY
+    return generate_latest(REGISTRY), 200, {"Content-Type": CONTENT_TYPE_LATEST}
 
 
 @app.route("/slo", methods=["GET"])
